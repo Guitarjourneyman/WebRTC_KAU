@@ -40,23 +40,25 @@ io.on('connection', socket => {
     socket.on('join_room', data => {
         // <kau_added> start
         // First entrance to the room
+        
         if (!data.studentId){
             assignedId = `student_${studentCounter++}`;
+            assignedDisabledVideo = data.isDisabledVideo || false; // <kau> added to track if video is disabled
             studentMap[assignedId] = {
                 socketId: socket.id,
                 stream: null,
                 room: data.room,
-                muted: false,
                 isDisabledVideo: false
             };
-        console.log(`new Student ID: ${assignedId} joined room: ${data.room} with socketID: ${socket.id} `);
+        console.log(`new Student ID: ${assignedId} joined room: ${data.room} with socketID: ${socket.id}, disabled video: ${studentMap[assignedId].isDisabledVideo}`);
         }
         // Rejoin the room
         else
             {
             assignedId = data.studentId;
             studentMap[assignedId].socketId = socket.id;
-            console.log(`Student ${assignedId} rejoined room: ${data.room} with socketID: ${socket.id}`);
+            assignedDisabledVideo = data.isDisabledVideo || false // <kau> added to track if video is disabled
+            console.log(`Student ${assignedId} rejoined room: ${data.room} with socketID: ${socket.id} , disabled video: ${assignedDisabledVideo}`);
         }
         // <kau_added> end
 
@@ -68,20 +70,21 @@ io.on('connection', socket => {
                 return;
             }
             // <kau> Add the user id and studentId to the users object
-            users[data.room].push({id: socket.id, studentId: assignedId});
+            users[data.room].push({id: socket.id, studentId: assignedId, isDisabledVideo: assignedDisabledVideo});
             console.log("1.users updated:", users);
         } else {
-            users[data.room] = [{id: socket.id, studentId: assignedId}];
+            users[data.room] = [{id: socket.id, studentId: assignedId, isDisabledVideo: assignedDisabledVideo}];
             console.log("new room created:");
         }
         // Original code ends here
 
         // <kau_added> Send initial assigned student ID and its config to the client
-        socket.emit("student_id_assigned", {
+        socket.emit("initial_setting", {
         studentId: assignedId,
-
+        isDisabledVideo: assignedDisabledVideo, // <kau> added to track if video is disabled
         //config: studentMap[assignedId]
         });
+        
 
 
         // Original code starts here 
@@ -91,25 +94,54 @@ io.on('connection', socket => {
         socket.join(data.room);
         console.log(`[${socketToRoom[socket.id]}]: ${assignedId}/${socket.id} enter `);
 
-        //<kau> Show all users in the room except itself
-        const usersInThisRoom = users[data.room].filter(user => user.id !== socket.id);
-        console.log(usersInThisRoom);
-
+        //<kau> Show all users in the room to the new user
+        // const usersInThisRoom = users[data.room].filter(user => user.id !== socket.id);
+        // console.log(usersInThisRoom);
+        // // <kau> Edit all_users to send students objects instead of just ids
+        // const studentsInThisRoom = usersInThisRoom.map(user => {
+        //     const student = studentMap[user.studentId] || {};
+        //     return {
+        //         id: user.id,
+        //         studentId: user.studentId,
+        //         stream: student.stream || null, // <kau> Add stream if exists
+        //         isDisabledVideo: student.isDisabledVideo || false // <kau> Add video status if exists
+        //     };});
+        // // Alrert the other users in the room that a new user has joined
+        // // so that it can make a connection
+        // // <kau> Edit all_users to send students objects instead of just ids
+        // io.sockets.to(socket.id).emit('all_users', studentsInThisRoom);
+        // console.log('all_users:', studentsInThisRoom);
         
-        // Alrert the other users in the room that a new user has joined
-        // so that it can make a connection
-        io.sockets.to(socket.id).emit('all_users', usersInThisRoom);
+        socket.on("ready_to_receive_users", (data) => {
+            const usersInRoom = users[data.room]?.filter(user => user.id !== socket.id) || [];
+
+            const studentsInThisRoom = usersInRoom.map(user => {
+                const student = studentMap[user.studentId] || {};
+                return {
+                    id: user.id,
+                    studentId: user.studentId,
+                    stream: student.stream || null,
+                    isDisabledVideo: student.isDisabledVideo || false
+                };
+            });
+
+            io.sockets.to(socket.id).emit('all_users', studentsInThisRoom);
+            console.log(`[${data.room}] ready_to_receive_users → all_users resent:`, studentsInThisRoom);
+});
+
     });
     /*<kau>   Peer information exchange part   */
 
     //<kau> Send offer to the user with its RTCSessionDescription
     socket.on('offer', data => {
         //console.log(data.sdp);
-        socket.to(data.offerReceiveID).emit('getOffer', {sdp: data.sdp, offerSendID: data.offerSendID, offerSendStudentId: data.offerSendStudentId});
+        // console.log(`offer from ${data.offerSendID} studentID ${data.offererStudentId} to ${data.offerReceiveID}`);
+        socket.to(data.offerReceiveID).emit('getOffer', {sdp: data.sdp, offererID: data.offerSendID, offererStudentId: data.offererStudentId, offererIsDisabledVideo: data.offererIsDisabledVideo});
     });
     //<kau> Send an answer to the user sent an offer
     socket.on('answer', data => {
         //console.log(data.sdp);
+        //console.log(`answer from ${data.answerSendID} to ${data.answerReceiveID}`);
         socket.to(data.answerReceiveID).emit('getAnswer', {sdp: data.sdp, answerSendID: data.answerSendID});
     });
     //<kau> After a user received signal info by offer and answer, it sends the its candidate info to the another peer

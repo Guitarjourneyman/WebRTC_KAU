@@ -166,7 +166,7 @@ interface Props {
 const Video = ({ studentId,  stream, muted, isDisabledVideo }: Props) => {
 	const ref = useRef<HTMLVideoElement>(null);
 	const [isMuted, setIsMuted] = useState<boolean>(false);
-	//console.log(`Video component for studentId: ${studentId}, muted: ${muted}, isDisabledVideo: ${isDisabledVideo}`);
+	console.log(`index.tsx: Video component for studentId: ${studentId}, muted: ${muted}, isDisabledVideo: ${isDisabledVideo}`);
 	useEffect(() => {
 		if (muted) setIsMuted(true);
 	}, [muted]);
