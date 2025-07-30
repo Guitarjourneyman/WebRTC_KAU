@@ -40,7 +40,8 @@ io.on('connection', socket => {
     socket.on('join_room', data => {
         // <kau_added> start
         // First entrance to the room
-        
+        let assignedId;
+        let assignedDisabledVideo;
         if (!data.studentId){
             assignedId = `student_${studentCounter++}`;
             assignedDisabledVideo = data.isDisabledVideo || false; // <kau> added to track if video is disabled
@@ -56,9 +57,9 @@ io.on('connection', socket => {
         else
             {
             assignedId = data.studentId;
-            studentMap[assignedId].socketId = socket.id;
-            assignedDisabledVideo = data.isDisabledVideo || false // <kau> added to track if video is disabled
-            console.log(`Student ${assignedId} rejoined room: ${data.room} with socketID: ${socket.id} , disabled video: ${assignedDisabledVideo}`);
+            assignedDisabledVideo = data.isDisabledVideo;
+            studentMap[data.studentId].socketId = socket.id;
+            console.log(`Student ${data.studentId} rejoined room: ${data.room} with socketID: ${socket.id} , disabled video: ${data.isDisabledVideo}`);
         }
         // <kau_added> end
 
@@ -71,19 +72,22 @@ io.on('connection', socket => {
             }
             // <kau> Add the user id and studentId to the users object
             users[data.room].push({id: socket.id, studentId: assignedId, isDisabledVideo: assignedDisabledVideo});
-            console.log("1.users updated:", users);
+            //console.log("1.users updated:", users);
         } else {
             users[data.room] = [{id: socket.id, studentId: assignedId, isDisabledVideo: assignedDisabledVideo}];
-            console.log("new room created:");
+            // console.log("new room created:");
         }
         // Original code ends here
 
-        // <kau_added> Send initial assigned student ID and its config to the client
-        socket.emit("initial_setting", {
+        // <kau_added> Send initial student object to the peer
+        const student = {
         studentId: assignedId,
-        isDisabledVideo: assignedDisabledVideo, // <kau> added to track if video is disabled
-        //config: studentMap[assignedId]
-        });
+        isDisabledVideo: assignedDisabledVideo,
+        // Future prop
+        // stream: studentMap[assignedId]?.stream, 
+        };
+        socket.emit("initial_setting", { student });
+
         
 
 
@@ -121,7 +125,7 @@ io.on('connection', socket => {
                     id: user.id,
                     studentId: user.studentId,
                     stream: student.stream || null,
-                    isDisabledVideo: student.isDisabledVideo || false
+                    isDisabledVideo: student.isDisabledVideo || false // if undefiend or false, it's false
                 };
             });
 
@@ -146,9 +150,57 @@ io.on('connection', socket => {
     });
     //<kau> After a user received signal info by offer and answer, it sends the its candidate info to the another peer
     socket.on('candidate', data => {
-        //console.log(data.candidate);
+        // console.log(data.candidate);
         socket.to(data.candidateReceiveID).emit('getCandidate', {candidate: data.candidate, candidateSendID: data.candidateSendID});
     })
+
+    // <kau> 2. Server: Togglling command to the targetsocketID
+    /*
+        room: '1234',
+	    socketID: targetSocketId,
+    */
+    socket.on('toggleVideo', (data) => {
+        const { socketID: targetSocketId, room } = data;
+
+        let targetStudentId = null;
+        let toggledDisabledVideo = null;
+
+        // Find studentId by socketId and toggle isDisabledVideo state
+        for (const studentId in studentMap) {
+            if (Object.prototype.hasOwnProperty.call(studentMap, studentId)) {
+            const student = studentMap[studentId];
+
+            if (student.socketId === targetSocketId) {
+                targetStudentId = studentId;
+
+                // Toggle the video disabled state
+                student.isDisabledVideo = !student.isDisabledVideo;
+                toggledDisabledVideo = student.isDisabledVideo;
+
+                break;
+            }
+            }
+        }
+
+        if (!targetStudentId) {
+            console.warn(`No studentId found for socketID: ${targetSocketId}`);
+            return;
+        }
+
+        // Notify all peers in the room about the video toggle
+        io.to(room).emit('toggleVideo', {
+            studentId: targetStudentId,
+            disabledVideo: toggledDisabledVideo,
+        });
+
+        console.log(
+            `Broadcast toggleVideo to room [${room}]`,
+            `studentId: ${targetStudentId},`,
+            `socketID: ${targetSocketId},`,
+            `disabledVideo: ${toggledDisabledVideo}`
+        );
+});
+
 
 
     /*<kau>   Peer information exchange part   */
